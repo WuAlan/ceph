@@ -6,6 +6,10 @@
 
 #include "include/rados/librados.h"
 #include "include/rados/librados.hpp"
+
+// Workaround gmock configuration glitch
+#undef GTEST_HAS_TR1_TUPLE
+#define GTEST_HAS_TR1_TUPLE 1
 #include "gtest/gtest.h"
 
 #include <string>

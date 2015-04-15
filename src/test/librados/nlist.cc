@@ -1,4 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+// vim: ts=8 sw=2 smarttab
 #include "include/rados/librados.h"
 #include "include/rados/librados.hpp"
 #include "include/stringify.h"
@@ -6,7 +7,18 @@
 #include "test/librados/TestCase.h"
 
 #include "include/types.h"
+#if 0
+namespace testing {
+  namespace internal {
+    typedef ::std::vector<string> Strings;
+  }
+}
+#endif
+#undef GTEST_HAS_TR1_TUPLE
+#define GTEST_HAS_TR1_TUPLE 1
 #include "gtest/gtest.h"
+#include "gtest/gtest-printers.h"
+#include "gmock/gmock.h"
 #include <errno.h>
 #include <string>
 
@@ -687,3 +699,55 @@ TEST_F(LibRadosListECPP, ListObjectsStartPP) {
     ++p;
   }
 }
+
+std::vector<std::string> enumerate_objects(IoCtx *io_ctx, int m)
+{
+  std::vector<std::string> result;
+
+  for (int n = 0; n < m; ++n) {
+    librados::NObjectIterator i;
+    if (m == 1) {
+      i = io_ctx->nobjects_begin();
+    } else {
+      i = io_ctx->nobjects_begin(n, m);
+    }
+
+    int n_count = 0;
+    librados::NObjectIterator i_end = io_ctx->nobjects_end();
+    for (; i != i_end; ++i) {
+      result.push_back(i->get_oid());
+      ++n_count;
+    }
+  }
+
+  return result;
+}
+
+TEST_F(LibRadosListPP, ListObjectsRangePP) {
+  // Create some objects
+  char buf[128];
+  memset(buf, 0xcc, sizeof(buf));
+  bufferlist bl;
+  bl.append(buf, sizeof(buf));
+
+  std::vector<std::string> all_objs;
+  for (int i=0; i < 128; ++i) {
+    ASSERT_EQ(0, ioctx.write(stringify(i), bl, bl.length(), 0));
+    all_objs.push_back(stringify(i));
+  }
+
+  // List them using vanilla listing
+  baseline_objs = enumerate_objects(&ioctx, 1);
+  ASSERT_THAT(baseline_objs, ::testing::ElementsAreArray(all_objs));
+
+  // List them using sharded listing
+  for (int M = 2; M < 27; ++M) {
+    std::vector<std::string> these_objects;
+    these_objects = enumerate_objects(&ioctx, M);
+    if (these_objects != all_objs) {
+      std::cout << "Mismatch at M=" << M << std::endl;
+    }
+    ASSERT_THAT(these_objects, ::testing::ElementsAreArray(all_objs));
+  }
+}
+
