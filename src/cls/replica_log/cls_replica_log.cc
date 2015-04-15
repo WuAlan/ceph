@@ -22,6 +22,7 @@ cls_handle_t h_class;
 cls_method_handle_t h_replica_log_set;
 cls_method_handle_t h_replica_log_delete;
 cls_method_handle_t h_replica_log_get;
+cls_method_handle_t h_replica_log_list;
 
 static const string replica_log_prefix = "rl_";
 static const string replica_log_bounds = replica_log_prefix + "bounds";
@@ -149,6 +150,54 @@ static int cls_replica_log_get(cls_method_context_t hctx,
   return 0;
 }
 
+static int cls_replica_log_list(cls_method_context_t hctx,
+                               bufferlist *in, bufferlist *out)
+{
+  bufferlist::iterator in_iter = in->begin();
+
+  cls_replica_log_list_keys_op op;
+  try {
+    ::decode(op, in_iter);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: cls_replica_log_list(): failed to decode op");
+    return -EINVAL;
+  }
+
+  cls_replica_log_list_keys_ret ret;
+
+  set<string> raw_keys;
+
+#define MAX_KEYS 100
+  int rc = cls_cxx_map_get_keys(hctx, op.marker, MAX_KEYS + 1, &raw_keys);
+  if (rc < 0) {
+    return rc;
+  }
+
+  set<string>::iterator iter = raw_keys.begin();
+  int i;
+  for (i = 0; i < MAX_KEYS && iter != raw_keys.end(); ++i, ++iter) {
+    const string& k = *iter;
+    if (k.size() < 3) {
+      /* should never happen */
+      return -EIO;
+    }
+    if (k[2] == '.') { /* starts with "rl." */
+      ret.keys.insert(k.substr(3));
+    } else {
+      /*
+       * the default raw key translate into "rl_bounds",
+       * yeah, I know; it is what it is
+       */
+      ret.keys.insert(string());
+    }
+  }
+
+  ret.is_truncated = (iter != raw_keys.end());
+
+  ::encode(ret, *out);
+  return 0;
+}
+
 void __cls_init()
 {
   CLS_LOG(1, "Loaded replica log class!");
@@ -161,4 +210,6 @@ void __cls_init()
                           cls_replica_log_get, &h_replica_log_get);
   cls_register_cxx_method(h_class, "delete", CLS_METHOD_RD | CLS_METHOD_WR,
                           cls_replica_log_delete, &h_replica_log_delete);
+  cls_register_cxx_method(h_class, "list", CLS_METHOD_RD,
+                          cls_replica_log_list, &h_replica_log_list);
 }
